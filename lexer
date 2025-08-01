@@ -1,0 +1,268 @@
+-- Lexer module for Roblox Lua
+-- Returns a table with a tokenize function
+-- made by ooopxz
+
+local Lexer = {}
+
+-- Lua keywords
+local keywords = {
+	["and"] = true, ["break"] = true, ["do"] = true, ["else"] = true,
+	["elseif"] = true, ["end"] = true, ["false"] = true, ["for"] = true,
+	["function"] = true, ["if"] = true, ["in"] = true, ["local"] = true,
+	["nil"] = true, ["not"] = true, ["or"] = true, ["repeat"] = true,
+	["return"] = true, ["then"] = true, ["true"] = true, ["until"] = true,
+	["while"] = true
+}
+
+-- Lua operators
+local operators = {
+	["+"] = true, ["-"] = true, ["*"] = true, ["/"] = true, ["%"] = true,
+	["^"] = true, ["#"] = true, ["=="] = true, ["~="] = true, ["<="] = true,
+	[">="] = true, ["<"] = true, [">"] = true, ["="] = true, [";"] = true,
+	[":"] = true, [","] = true, ["."] = true, [".."] = true, ["..."] = true,
+	["("] = true, [")"] = true, ["["] = true, ["]"] = true, ["{"] = true,
+	["}"] = true
+}
+
+-- Token types
+Lexer.TT = {
+	Keyword = "Keyword",
+	Identifier = "Identifier",
+	String = "String",
+	Number = "Number",
+	Operator = "Operator",
+	Comment = "Comment",
+	Whitespace = "Whitespace",
+	EOF = "EOF"
+}
+
+-- Helper function to check if a character is whitespace
+local function isWhitespace(char)
+	return char == " " or char == "\t" or char == "\n" or char == "\r"
+end
+
+-- Helper function to check if a character is a digit
+local function isDigit(char)
+	return char and char:match("%d")
+end
+
+-- Helper function to check if a character is a letter or underscore
+local function isAlpha(char)
+	return char and (char:match("%a") or char == "_")
+end
+
+-- Helper function to check if a character is alphanumeric
+local function isAlphaNum(char)
+	return isAlpha(char) or isDigit(char)
+end
+
+-- Main tokenize function
+function Lexer.tokenize(source)
+	local tokens = {}
+	local pos = 1
+	local len = #source
+
+	while pos <= len do
+		local char = source:sub(pos, pos)
+
+		-- Skip whitespace
+		if isWhitespace(char) then
+			local start = pos
+			while pos <= len and isWhitespace(source:sub(pos, pos)) do
+				pos = pos + 1
+			end
+			table.insert(tokens, {
+				type = Lexer.TT.Whitespace,
+				value = source:sub(start, pos - 1),
+				start = start,
+				finish = pos - 1
+			})
+
+			-- Handle comments
+		elseif char == "-" and source:sub(pos + 1, pos + 1) == "-" then
+			local start = pos
+			pos = pos + 2
+			-- Block comment
+			if source:sub(pos, pos) == "[" then
+				pos = pos + 1
+				if source:sub(pos, pos) == "[" then
+					pos = pos + 1
+					local level = 1
+					while pos <= len and level > 0 do
+						if source:sub(pos, pos + 1) == "]" then
+							pos = pos + 1
+							level = level - 1
+						elseif source:sub(pos, pos + 1) == "[[" then
+							pos = pos + 1
+							level = level + 1
+						end
+						pos = pos + 1
+					end
+				else
+					-- Single line comment
+					while pos <= len and source:sub(pos, pos) ~= "\n" do
+						pos = pos + 1
+					end
+				end
+			else
+				-- Single line comment
+				while pos <= len and source:sub(pos, pos) ~= "\n" do
+					pos = pos + 1
+				end
+			end
+			table.insert(tokens, {
+				type = Lexer.TT.Comment,
+				value = source:sub(start, pos - 1),
+				start = start,
+				finish = pos - 1
+			})
+
+			-- Handle strings
+		elseif char == "\"" or char == "'" then
+			local start = pos
+			local quote = char
+			pos = pos + 1
+			local escape = false
+			while pos <= len do
+				local current = source:sub(pos, pos)
+				if escape then
+					escape = false
+				elseif current == "\\" then
+					escape = true
+				elseif current == quote then
+					pos = pos + 1
+					break
+				end
+				pos = pos + 1
+			end
+			table.insert(tokens, {
+				type = Lexer.TT.String,
+				value = source:sub(start, pos - 1),
+				start = start,
+				finish = pos - 1
+			})
+
+			-- Handle numbers
+		elseif isDigit(char) or (char == "." and isDigit(source:sub(pos + 1, pos + 1))) then
+			local start = pos
+			while pos <= len and isDigit(source:sub(pos, pos)) do
+				pos = pos + 1
+			end
+			if source:sub(pos, pos) == "." then
+				pos = pos + 1
+				while pos <= len and isDigit(source:sub(pos, pos)) do
+					pos = pos + 1
+				end
+			end
+			if source:sub(pos, pos):lower() == "e" then
+				pos = pos + 1
+				if source:sub(pos, pos) == "+" or source:sub(pos, pos) == "-" then
+					pos = pos + 1
+				end
+				while pos <= len and isDigit(source:sub(pos, pos)) do
+					pos = pos + 1
+				end
+			end
+			table.insert(tokens, {
+				type = Lexer.TT.Number,
+				value = source:sub(start, pos - 1),
+				start = start,
+				finish = pos - 1
+			})
+
+			-- Handle identifiers and keywords
+		elseif isAlpha(char) then
+			local start = pos
+			while pos <= len and isAlphaNum(source:sub(pos, pos)) do
+				pos = pos + 1
+			end
+			local value = source:sub(start, pos - 1)
+			local tokenType = keywords[value] and Lexer.TT.Keyword or Lexer.TT.Identifier
+			table.insert(tokens, {
+				type = tokenType,
+				value = value,
+				start = start,
+				finish = pos - 1
+			})
+
+			-- Handle operators
+		else
+			-- Check for multi-character operators first
+			local found = false
+			for opLen = 3, 1, -1 do
+				local candidate = source:sub(pos, pos + opLen - 1)
+				if operators[candidate] then
+					table.insert(tokens, {
+						type = Lexer.TT.Operator,
+						value = candidate,
+						start = pos,
+						finish = pos + opLen - 1
+					})
+					pos = pos + opLen
+					found = true
+					break
+				end
+			end
+
+			if not found then
+				-- Unknown character (could be syntax error)
+				table.insert(tokens, {
+					type = "Unknown",
+					value = char,
+					start = pos,
+					finish = pos
+				})
+				pos = pos + 1
+			end
+		end
+	end
+
+	-- Add EOF token
+	table.insert(tokens, {
+		type = Lexer.TT.EOF,
+		value = "",
+		start = pos,
+		finish = pos
+	})
+
+	return tokens
+end
+
+function Lexer.replaceTokens(source, tokenType, replacementFunc)
+	local tokens = Lexer.tokenize(source)
+	local parts = {}
+	local lastPos = 1
+
+	for _, token in ipairs(tokens) do
+		if token.start > lastPos then
+			table.insert(parts, source:sub(lastPos, token.start - 1))
+		end
+
+		if token.type == tokenType then
+			table.insert(parts, replacementFunc(token.value))
+		else
+			table.insert(parts, token.value)
+		end
+
+		lastPos = token.finish + 1
+	end
+	if lastPos <= #source then
+		table.insert(parts, source:sub(lastPos))
+	end
+
+	return table.concat(parts)
+end
+
+function Lexer.replaceNumbers(source, transformFunc)
+	return Lexer.replaceTokens(source, Lexer.TT.Number, function(value)
+		return tostring(transformFunc(tonumber(value)))
+	end)
+end
+function Lexer.replaceStrings(source, transformFunc)
+	return Lexer.replaceTokens(source, Lexer.TT.String, transformFunc)
+end
+function Lexer.replaceIdentifiers(source, transformFunc)
+	return Lexer.replaceTokens(source, Lexer.TT.Identifier, transformFunc)
+end
+
+return Lexer
