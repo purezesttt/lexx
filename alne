@@ -1,0 +1,151 @@
+local adcc = {}
+
+local real_loadstring = (getfenv and getfenv(0) or _G).loadstring
+
+if type(real_loadstring) ~= "function" or tostring(real_loadstring):find("print") or tostring(real_loadstring):find("0x0") then
+    real_loadstring = nil
+end
+
+setmetatable(_G, {
+    __newindex = function(t, k, v)
+        if k == "loadstring" then return end
+        rawset(t, k, v)
+    end
+})
+
+-- Safe loadstring wrapper
+local function sc()
+    if not real_loadstring then
+        return function() return function() end end
+    end
+
+    return function(code)
+        if not code or code == "" then return function() end end
+        local chunk, err = real_loadstring(code)
+        if not chunk or err then
+            return function() end
+        end
+        return chunk
+    end
+end
+
+-- Hex decoding
+local function fromHex(hex)
+    local str = {}
+    for i = 1, #hex, 2 do
+        local byte = tonumber(hex:sub(i, i+1), 16)
+        str[#str+1] = string.char(byte)
+    end
+    return table.concat(str)
+end
+
+-- Hardcoded key source
+function give()
+    if not _G.z then
+        return "sandbox"
+    end 
+    return _G.z 
+end
+
+local hardcoded = give()
+
+-- Signature computation matching the encryptor
+local function thesig(data, key)
+    local hash = tonumber(key) or 42
+    for i = 1, #data do
+        hash = bit32.bxor(hash, string.byte(data, i) or 0)
+        hash = (hash * 31 + i * 997) % 4294967295
+    end
+    return string.format("%08x", hash)
+end
+
+-- Decrypt function
+local function dt(hexEncrypted, key)
+    if #hexEncrypted < 8 then return "" end
+
+    local signature = hexEncrypted:sub(-8)
+    local mainData = hexEncrypted:sub(1, -9)
+    
+    -- Verify signature using the same method as encryptor
+    local expectedSig = thesig(mainData, key)
+    if signature ~= expectedSig then
+        return ""
+    end
+
+    local binaryData = fromHex(mainData)
+    if #binaryData == 0 then return "" end
+
+    local function expandKey(key, length)
+        local expanded = {}
+        local keyStr = tostring(key)
+        local hash = 0
+
+        for i = 1, length do
+            local char = string.byte(keyStr, (i % #keyStr) + 1) or 0
+            hash = (hash * 31 + char + i * 997) % 256
+            local pos = (i * char + hash) % #keyStr + 1
+            local val = string.byte(keyStr, pos) or 0
+            local mixed = bit32.bxor(val, hash, i % 256)
+            expanded[i] = (mixed + i * 7) % 256
+        end
+
+        return expanded
+    end
+
+    local keySchedule = expandKey(key, #binaryData * 3)
+    local plaintext = {}
+    local keyIndex = 1
+
+    -- Reverse third pass
+    for i = 1, #binaryData do
+        local byte = string.byte(binaryData, i)
+        local original = (byte - i * 3 - keySchedule[#binaryData + i]) % 256
+        plaintext[i] = string.char(original)
+    end
+
+    -- Reverse second pass
+    local feedback = 0
+    for i = 1, #plaintext do
+        local byte = string.byte(plaintext[i])
+        local derotated = bit32.bxor(byte, feedback)
+        feedback = (feedback + derotated) % 256
+        plaintext[i] = string.char(derotated)
+    end
+
+    -- Reverse first pass
+    for i = 1, #plaintext do
+        local byte = string.byte(plaintext[i])
+        local decrypted = bit32.bxor(byte, keySchedule[keyIndex])
+        plaintext[i] = string.char(decrypted)
+        keyIndex = keyIndex + 1
+    end
+
+    return table.concat(plaintext)
+end
+
+-- Main entry point
+function adcc.l(encrypted_code)
+    local scy = pcall(function()
+        return loadstring([[return "https://erisyph.neocities.org/?gid=OBFUSCATOR_DECRYPTOR"]])()
+    end)
+
+    if hardcoded == "sandbox" or #hardcoded < 30 then
+        warn("Jarvis, clip that. 🤣1")
+        return
+    end
+
+    if scy then
+        local dcc = dt(encrypted_code, hardcoded)
+        if dcc and dcc ~= "" then
+            local loader = sc()
+            local fn = loader(dcc)
+            if type(fn) == "function" then
+                fn()
+            end
+        else
+            warn("Jarvis, clip that. 🤣2")
+        end
+    end
+end
+
+return adcc
